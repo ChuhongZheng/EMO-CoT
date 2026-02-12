@@ -6,7 +6,7 @@ wandb:
     project: EMO-CoT
     entity: zhengchuhong666fr-uc-san-diego
     log_every_steps: 100
-    name: EMO, test run, EMO-Frame
+    name: EMO, official run, EMO-Frame
     notes: 
 
 model:
@@ -17,7 +17,7 @@ model:
     n_out_intermediate: 2 # s1 s2
 
 training:
-    train_steps: 5001 # for test run
+    # train_steps: 5001 # for test run
     task_kwargs: 
         ## IMPORTANT ##
         hidden_layer_size: 4 # data side, must be the same as model.hidden_layer_size
