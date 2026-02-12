@@ -19,5 +19,5 @@ conda activate in-context-learning
 
 ## Test
 1. Enter into directory ```src```
-2. Refer to the ```eval.ipynb``` file
+2. Refer to the ```eval.ipynb``` and `eval_wandb.ipynb`file
 
