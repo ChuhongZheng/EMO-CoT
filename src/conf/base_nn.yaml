@@ -3,21 +3,21 @@ inherit:
 
 model:
     family: gpt2_nn
-    n_positions: 101
+    n_positions: 101 # N 1-100 points
     n_in_intermediate: 0
     n_out_intermediate: 0
-    hidden_sep_embed: False
+    hidden_sep_embed: False # if True, different intermediate inputs/outputs use different embedding layers
 
 training:
     data: gaussian
     task: relu_nn_regression
     task_kwargs: 
         mode: 'relu'
-    batch_size: 64
-    learning_rate: 0.0001
+    batch_size: 64 # 64 is the default batch size
+    learning_rate: 0.0001 # Adam learning rate
     save_every_steps: 1000
     keep_every_steps: 100000
-    train_steps: 500001
+    train_steps: 50001 # 50k epochs
     curriculum:
         dims:
             start: 5

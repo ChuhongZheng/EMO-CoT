@@ -1,4 +1,4 @@
 model:
     n_embd: 64
-    n_layer: 3
+    n_layer: 3 # 3 layers of transformers (GPT2) 
     n_head: 2
