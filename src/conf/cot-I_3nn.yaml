@@ -1,0 +1,43 @@
+inherit: 
+    - base_nn.yaml
+    - models/tiny.yaml
+
+wandb:
+    project: EMO-CoT
+    entity: zhengchuhong666fr-uc-san-diego
+    log_every_steps: 100
+    name: CoT-I, official run, aligned
+    notes: 
+
+model:
+    n_dims: 10 # dimension of input x is 10
+    hidden_layer_size: 4 # hidden layer size is 4, transformer side
+    ### ICL
+    # n_in_intermediate: 0
+    # n_out_intermediate: 0
+    ### CoT-I
+    n_in_intermediate: 2 # s1 s2
+    n_out_intermediate: 0
+    ### CoT-I/O
+    # n_in_intermediate: 2 # s1 s2
+    # n_out_intermediate: 2 # s1 s2
+
+training:
+    # train_steps: 5001 # for test run
+    task_kwargs: 
+        ## IMPORTANT ##
+        hidden_layer_size: 4 # data side, must be the same as model.hidden_layer_size
+        n_layers: 3 # x->s1->s2->y
+    curriculum:
+        points:
+            start: 1 # start from 1 point
+            end: 101
+            inc: 5
+            interval: 2000
+        dims: # keep 10 dimensions
+            start: 10
+            end: 10
+            inc: 1
+            interval: 2000
+
+out_dir: ../models/cot-I_3nn
