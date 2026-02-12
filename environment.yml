@@ -1,4 +1,4 @@
-name: transformers-playground
+name: emo
 channels:
   - pytorch
   - defaults
@@ -6,6 +6,7 @@ dependencies:
   - pip=21.2.4
   - python=3.8.12
   - pytorch=1.11.0
+  - cudatoolkit=11.3
   - pip:
     - jupyter==1.0.0
     - matplotlib==3.5.2
@@ -16,6 +17,6 @@ dependencies:
     - seaborn==0.11.2
     - tqdm==4.64.0
     - transformers==4.17.0
-    - wandb==0.12.11
+    - wandb==0.24.2
     - xgboost==1.6.1
     - protobuf==3.20.1
