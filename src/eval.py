@@ -62,7 +62,20 @@ def eval_batch(model, task_sampler, xs, task_name=None):
         raise NotImplementedError
     metrics = task.get_metric()(pred.cpu(), ys)
 
-    return metrics
+    # Stepwise losses per point (s1, s2, ..., y) for alignment with training; same step indices as wandb.
+    stepwise_losses = None
+    if task_name == "relu_nn_regression" and getattr(model, "n_in_intermediate", 0) > 0:
+        with torch.no_grad():
+            losses, _ = model(
+                xs.to(device), ys.to(device),
+                task.get_training_metric(),
+                layer_activations=layer_activations,
+                return_per_point=True,
+            )
+        # losses: list of (n_points,) tensors, one per step
+        stepwise_losses = [t.cpu() for t in losses]
+
+    return metrics, stepwise_losses
 
 
 def aggregate_metrics(metrics, bootstrap_trials=1000):
@@ -100,14 +113,24 @@ def eval_model(
     )
 
     all_metrics = []
+    all_stepwise = []  # list of list of (n_points,) tensors per batch
     for i in range(num_eval_examples // batch_size):
         xs = data_sampler.sample_xs(n_points, batch_size)
-        metrics = eval_batch(model, task_sampler, xs, task_name)
+        metrics, stepwise_losses = eval_batch(model, task_sampler, xs, task_name)
         all_metrics.append(metrics)
+        if stepwise_losses is not None:
+            all_stepwise.append(stepwise_losses)
 
     metrics = torch.cat(all_metrics, dim=0)
-
-    return aggregate_metrics(metrics)
+    results = aggregate_metrics(metrics)
+    # Aggregate stepwise loss per point: average over batches, result stepwise_loss.{k} = list of length n_points
+    if all_stepwise:
+        n_steps = len(all_stepwise[0])
+        for k in range(n_steps):
+            # stack batches: each batch has tensor (n_points,) -> stack -> (n_batches, n_points) -> mean(0) -> (n_points,)
+            stacked = torch.stack([batch[k] for batch in all_stepwise], dim=0)
+            results[f"stepwise_loss.{k}"] = stacked.mean(dim=0).tolist()
+    return results
 
 
 def build_evals(conf):

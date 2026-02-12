@@ -66,13 +66,13 @@ class TransformerNN(nn.Module):
             self._read_in_hidden = nn.ModuleList(
                 [nn.Linear(hidden_layer_size, n_embd) for i in range(self.n_in_intermediate)]
             )
+            # n_in_intermediate so CoT-I can compute step losses for logging (s1, s2, ...)
             self._read_out_hidden = nn.ModuleList(
-                [nn.Linear(n_embd, hidden_layer_size) for i in range(self.n_out_intermediate)]
+                [nn.Linear(n_embd, hidden_layer_size) for i in range(self.n_in_intermediate)]
             )
         else:
             if self.n_in_intermediate > 0:
                 self._read_in_hidden = nn.Linear(hidden_layer_size, n_embd)
-            if self.n_out_intermediate > 0:
                 self._read_out_hidden = nn.Linear(n_embd, hidden_layer_size)
 
     def _combine_embed(self, xs_b, ys_b, layer_activations=None):
@@ -97,7 +97,7 @@ class TransformerNN(nn.Module):
         zs_embed = zs_embed.view(bsize, len(stacked_tensors) * points, self.n_embd)
         return zs_embed
 
-    def forward(self, xs, ys, loss_func, layer_activations=None):
+    def forward(self, xs, ys, loss_func, layer_activations=None, return_per_point=False):
         if ((layer_activations is not None) and (self.n_in_intermediate > len(layer_activations))) \
             or ((layer_activations is None) and (self.n_in_intermediate != 0)):
             raise ValueError("the number of given intermediate features is not consistent with model setting")
@@ -106,18 +106,34 @@ class TransformerNN(nn.Module):
 
         embeds = self._combine_embed(xs, ys, layer_activations)
         output = self._backbone(inputs_embeds=embeds).last_hidden_state
-        
-        # calculate training loss
+
+        # Compute all step losses (s1, s2, ..., y) for alignment; only i < n_out_intermediate go into total_loss (CoT-I uses only y).
         losses = []
-        for i in range(self.n_out_intermediate):
+        total_loss = 0.0
+        for i in range(self.n_in_intermediate):
             if self.hidden_sep_embed:
                 pred_hidden = self._read_out_hidden[i](output[:, i:][:, ::x_idx_freq])
             else:
                 pred_hidden = self._read_out_hidden(output[:, i:][:, ::x_idx_freq])
-            losses += [loss_func(pred_hidden, layer_activations[i]).sum(-1).mean()]
-        pred = self._read_out(output[:, self.n_out_intermediate:][:, ::x_idx_freq])
-        losses += [loss_func(pred[:,:,0], ys).mean()]
-        return losses, sum(losses)  
+            step_loss_per_elem = loss_func(pred_hidden, layer_activations[i]).sum(-1)  # (B, P)
+            if return_per_point:
+                losses.append(step_loss_per_elem.mean(dim=0))  # (P,)
+            else:
+                losses.append(step_loss_per_elem.mean())
+            if not return_per_point and i < self.n_out_intermediate:
+                total_loss = total_loss + step_loss_per_elem.mean()
+        # y is at position n_in_intermediate in the sequence
+        pred = self._read_out(output[:, self.n_in_intermediate:][:, ::x_idx_freq])
+        loss_y_per_elem = loss_func(pred[:, :, 0], ys)  # (B, P)
+        if return_per_point:
+            losses.append(loss_y_per_elem.mean(dim=0))  # (P,)
+        else:
+            losses.append(loss_y_per_elem.mean())
+            total_loss = total_loss + loss_y_per_elem.mean()
+
+        if return_per_point:
+            return losses, None  # no total_loss for eval path
+        return losses, total_loss  
     
     def predict(self, xs, ys, layer_activations=None):
         if ((layer_activations is not None) and (self.n_in_intermediate > len(layer_activations))) \
@@ -145,6 +161,6 @@ class TransformerNN(nn.Module):
                     embeds = self._combine_embed(xs, ys, layer_activations)
                     output = self._backbone(inputs_embeds=embeds).last_hidden_state
                     
-                pred_y[:,i] = self._read_out(output[:, self.n_out_intermediate:][:, ::x_idx_freq][:,i])[:,0]
+                pred_y[:, i] = self._read_out(output[:, self.n_in_intermediate:][:, ::x_idx_freq][:, i])[:, 0]
             return pred_y
     
