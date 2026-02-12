@@ -1,0 +1,42 @@
+inherit: 
+    - base_nn.yaml
+    - models/tiny.yaml
+
+wandb:
+    project: EMO-CoT
+    entity: zhengchuhong666fr-uc-san-diego
+    log_every_steps: 100
+    name: EMO, test run, EMO-Frame
+    notes: 
+
+model:
+    n_dims: 10 # dimension of input x is 10
+    hidden_layer_size: 4 # hidden layer size is 4, transformer side
+    ### CoT-I/O 设置
+    n_in_intermediate: 2 # s1 s2
+    n_out_intermediate: 2 # s1 s2
+
+training:
+    train_steps: 5001 # for test run
+    task_kwargs: 
+        ## IMPORTANT ##
+        hidden_layer_size: 4 # data side, must be the same as model.hidden_layer_size
+        n_layers: 3 # x->s1->s2->y
+    curriculum:
+        points:
+            start: 1 # start from 1 point
+            end: 101
+            inc: 5
+            interval: 2000
+        dims: # keep 10 dimensions
+            start: 10
+            end: 10
+            inc: 1
+            interval: 2000
+    optimization:
+        algo: emo
+        emo_z_low: 0.0
+        emo_z_high: 10.0
+
+out_dir: ../models/emo_3nn
+

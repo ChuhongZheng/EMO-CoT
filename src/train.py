@@ -83,6 +83,76 @@ def _train_step_emo_g(model, xs, ys, optimizer, loss_func, layer_activations=Non
     return losses, final_loss.detach().item()
 
 
+def _train_step_emo(model, xs, ys, optimizer, loss_func, layer_activations, emo_state):
+    """
+    简化版 EMO：引入一个松弛变量 z，构造
+        V_k = f_k(theta) - k * z
+    选择 V_k 最大的层做一次更新，并根据 max(V_k) 的正负在 [z_low, z_high] 上做二分收缩。
+    """
+    optimizer.zero_grad()
+    losses, _ = model(xs, ys, loss_func, layer_activations=layer_activations)
+
+    z = emo_state["z"]
+    z_low = emo_state["z_low"]
+    z_high = emo_state["z_high"]
+
+    vals = []
+    for k, l in enumerate(losses):
+        vals.append(l - k * z)
+    vals_tensor = torch.stack(vals)
+    max_val, max_idx = torch.max(vals_tensor, dim=0)
+
+    final_loss = vals[max_idx]
+    final_loss.backward()
+    optimizer.step()
+
+    # 使用 max(V_k) 的符号更新 z 的区间（简单二分）
+    if max_val.item() <= 0.0:
+        z_high = z
+    else:
+        z_low = z
+    emo_state["z_low"] = z_low
+    emo_state["z_high"] = z_high
+    emo_state["z"] = 0.5 * (z_low + z_high)
+
+    losses = [ls.detach().item() for ls in losses]
+    return losses, final_loss.detach().item()
+
+
+def _train_step_emo_m(model, xs, ys, optimizer, loss_func, layer_activations, emo_m_state):
+    """
+    简化版 EMO-M：
+      - 维护每个 level 的一个平滑估计 E_k （类似 Moreau Envelope 的近似）
+      - 构造 V_k = f_k(theta) - stopgrad(E_k)
+      - 以 max_k V_k 作为优化目标。
+    这里用简单的指数滑动平均来近似 E_k 的更新。
+    """
+    optimizer.zero_grad()
+    losses, _ = model(xs, ys, loss_func, layer_activations=layer_activations)
+
+    alpha = emo_m_state["alpha"]
+    if emo_m_state["E"] is None or len(emo_m_state["E"]) != len(losses):
+        # 初始化为当前 loss 的无梯度拷贝
+        emo_m_state["E"] = [l.detach() for l in losses]
+
+    E_list = emo_m_state["E"]
+    vals = []
+    for k, l in enumerate(losses):
+        # E_k 使用 EMA 更新，但不参与当前图的梯度
+        E_k_old = E_list[k]
+        E_k_new = (1.0 - alpha) * E_k_old + alpha * l.detach()
+        E_list[k] = E_k_new.detach()
+        vals.append(l - E_k_new.detach())
+
+    vals_tensor = torch.stack(vals)
+    final_loss, _ = torch.max(vals_tensor, dim=0)
+    final_loss.backward()
+    optimizer.step()
+
+    losses = [ls.detach().item() for ls in losses]
+    return losses, final_loss.detach().item()
+
+
 def train(model, args):
     optimizer = torch.optim.Adam(model.parameters(), lr=args.training.learning_rate)
     curriculum = Curriculum(args.training.curriculum)
@@ -114,7 +184,25 @@ def train(model, args):
     task = task_sampler(**task_sampler_args)
 
     algo = args.training.optimization.algo
-    penalty_rho = getattr(args.training.optimization, "penalty_rho", 1.0)
+    opt_conf = args.training.optimization
+    penalty_rho = getattr(opt_conf, "penalty_rho", 1.0)
+
+    emo_state = None
+    emo_m_state = None
+    if algo == "emo":
+        z_low = getattr(opt_conf, "emo_z_low", 0.0)
+        z_high = getattr(opt_conf, "emo_z_high", 1.0)
+        emo_state = {
+            "z_low": z_low,
+            "z_high": z_high,
+            "z": 0.5 * (z_low + z_high),
+        }
+    elif algo == "emo_m":
+        emo_m_alpha = getattr(opt_conf, "emo_m_alpha", 0.1)
+        emo_m_state = {
+            "alpha": emo_m_alpha,
+            "E": None,
+        }
 
     for i in pbar:
         xs = data_sampler.sample_xs(
@@ -133,6 +221,18 @@ def train(model, args):
                 losses, loss = _train_step_cot_io_sum(
                     model, xs.cuda(), ys.cuda(), optimizer,
                     loss_func, layer_activations=layer_activations,
+                )
+            elif algo == "emo":
+                losses, loss = _train_step_emo(
+                    model, xs.cuda(), ys.cuda(), optimizer,
+                    loss_func, layer_activations=layer_activations,
+                    emo_state=emo_state,
+                )
+            elif algo == "emo_m":
+                losses, loss = _train_step_emo_m(
+                    model, xs.cuda(), ys.cuda(), optimizer,
+                    loss_func, layer_activations=layer_activations,
+                    emo_m_state=emo_m_state,
                 )
             elif algo == "penalty":
                 losses, loss = _train_step_penalty(

@@ -43,9 +43,20 @@ optimization_schema = {
     # - "cot_io_sum": 原始的所有 level 直接求和（当前默认行为）
     # - "penalty":    惩罚函数法，按幂次加权求和
     # - "emo_g":      基于梯度范数选择单一 level 更新
-    "algo": merge(tstring, allowed(["cot_io_sum", "penalty", "emo_g"]), default("cot_io_sum")),
+    # - "emo":        Epigraph Multi-level Optimization（简化实现）
+    # - "emo_m":      Moreau-like 平滑版本（运行时近似）
+    "algo": merge(
+        tstring,
+        allowed(["cot_io_sum", "penalty", "emo_g", "emo", "emo_m"]),
+        default("cot_io_sum"),
+    ),
     # penalty 方法的超参数：rho > 1 时，低层级的损失权重更大
     "penalty_rho": merge(tfloat, default(1.0)),
+    # EMO：z 的搜索区间
+    "emo_z_low": merge(tfloat, default(0.0)),
+    "emo_z_high": merge(tfloat, default(1.0)),
+    # EMO-M：平滑强度（越大越快接近当前 loss）
+    "emo_m_alpha": merge(tfloat, default(0.1)),
 }
 
 TASK_LIST = [
