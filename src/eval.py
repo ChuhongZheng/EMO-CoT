@@ -2,6 +2,8 @@ import json
 import os
 
 from munch import Munch
+from tqdm import tqdm
+import time
 import torch
 import yaml
 
@@ -57,7 +59,14 @@ def eval_batch(model, task_sampler, xs, task_name=None):
         raise NotImplementedError
 
     if model.name.split("_")[0] in ["gpt2"]:
-        pred = model.predict(xs.to(device), ys.to(device), layer_activations=layer_activations).detach()
+        # Show inner per-point progress only when requested (to avoid spamming output)
+        show_inner_progress = getattr(model, "_eval_show_inner_progress", False)
+        pred = model.predict(
+            xs.to(device),
+            ys.to(device),
+            layer_activations=layer_activations,
+            show_progress=show_inner_progress,
+        ).detach()
     else:
         raise NotImplementedError
     metrics = task.get_metric()(pred.cpu(), ys)
@@ -112,14 +121,28 @@ def eval_model(
         task_name, n_dims, batch_size, **task_sampler_kwargs
     )
 
+    n_batches = num_eval_examples // batch_size
+    print(f"[eval] task={task_name} n_points={n_points} batch_size={batch_size} n_batches={n_batches}")
+    t0 = time.time()
     all_metrics = []
     all_stepwise = []  # list of list of (n_points,) tensors per batch
-    for i in range(num_eval_examples // batch_size):
+    pbar = tqdm(range(n_batches), desc=f"Evaluating ({task_name})", leave=True)
+    for i in pbar:
+        # Only show per-point predict progress for the first batch (visibility without huge output)
+        model._eval_show_inner_progress = (i == 0)
+        batch_t0 = time.time()
         xs = data_sampler.sample_xs(n_points, batch_size)
         metrics, stepwise_losses = eval_batch(model, task_sampler, xs, task_name)
         all_metrics.append(metrics)
         if stepwise_losses is not None:
             all_stepwise.append(stepwise_losses)
+        batch_dt = time.time() - batch_t0
+        elapsed = time.time() - t0
+        avg = elapsed / (i + 1)
+        eta = avg * (n_batches - (i + 1))
+        pbar.set_postfix({"batch_s": f"{batch_dt:.2f}", "eta_s": f"{eta:.0f}"})
+    if hasattr(model, "_eval_show_inner_progress"):
+        delattr(model, "_eval_show_inner_progress")
 
     metrics = torch.cat(all_metrics, dim=0)
     results = aggregate_metrics(metrics)

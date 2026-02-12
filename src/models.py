@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from transformers import GPT2Model, GPT2Config
+from tqdm import tqdm
 
 
 def build_model(conf):
@@ -135,7 +136,7 @@ class TransformerNN(nn.Module):
             return losses, None  # no total_loss for eval path
         return losses, total_loss  
     
-    def predict(self, xs, ys, layer_activations=None):
+    def predict(self, xs, ys, layer_activations=None, show_progress: bool = False):
         if ((layer_activations is not None) and (self.n_in_intermediate > len(layer_activations))) \
             or ((layer_activations is None) and (self.n_in_intermediate != 0)):
             raise ValueError("the number of given intermediate features is not consistent with model setting")
@@ -147,7 +148,10 @@ class TransformerNN(nn.Module):
             output = self._backbone(inputs_embeds=embeds).last_hidden_state
 
             pred_y = torch.zeros_like(ys)
-            for i in range(ys.shape[1]-1, -1, -1):
+            it = range(ys.shape[1] - 1, -1, -1)
+            if show_progress:
+                it = tqdm(it, desc="Predicting (per-point)", leave=False)
+            for i in it:
                 xs = xs[:,:i+1]
                 ys = ys[:,:i+1]
                 if layer_activations is not None:
