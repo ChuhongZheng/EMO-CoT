@@ -36,7 +36,7 @@ training:
     optimization:
         algo: emo
         emo_z_low: 0.0
-        emo_z_high: 10.0
+        emo_z_high: 5.0
 
 out_dir: ../models/emo_3nn
 
