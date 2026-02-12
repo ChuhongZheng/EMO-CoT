@@ -209,4 +209,66 @@ def get_run_metrics(run_path, step=-1, cache=True):
     return metrics
 
 
+def get_run_metrics_with_ood(
+    run_path,
+    step: int = -1,
+    cache: bool = True,
+    ood_data_name: str = "gaussian_ood",
+):
+    """
+    Evaluate a run on both ID (training distribution) and OOD data.
 
+    Returns a dict with two keys:
+      - "ID":  metrics on the original training data distribution
+      - "OOD": metrics on the specified OOD distribution (default: gaussian_ood)
+    """
+    model, conf = get_model_from_run(run_path, step)
+    model = model.cuda().eval()
+    base_kwargs = build_evals(conf)
+
+    results = {}
+
+    # ---------- ID metrics (reuse existing caching scheme) ----------
+    if not cache:
+        id_save_path = None
+    elif step == -1:
+        id_save_path = os.path.join(run_path, "metrics.json")
+    else:
+        id_save_path = os.path.join(run_path, f"metrics_{step}.json")
+
+    id_metrics = None
+    if id_save_path is not None:
+        try:
+            with open(id_save_path) as fp:
+                id_metrics = json.load(fp)
+        except Exception:
+            id_metrics = None
+
+    if id_metrics is None:
+        id_metrics = compute_evals(model, base_kwargs, id_save_path)
+    results["ID"] = id_metrics
+
+    # ---------- OOD metrics (separate cache file) ----------
+    ood_kwargs = dict(base_kwargs)
+    ood_kwargs["data_name"] = ood_data_name
+
+    if not cache:
+        ood_save_path = None
+    elif step == -1:
+        ood_save_path = os.path.join(run_path, "metrics_ood.json")
+    else:
+        ood_save_path = os.path.join(run_path, f"metrics_ood_{step}.json")
+
+    ood_metrics = None
+    if ood_save_path is not None:
+        try:
+            with open(ood_save_path) as fp:
+                ood_metrics = json.load(fp)
+        except Exception:
+            ood_metrics = None
+
+    if ood_metrics is None:
+        ood_metrics = compute_evals(model, ood_kwargs, ood_save_path)
+    results["OOD"] = ood_metrics
+
+    return results
