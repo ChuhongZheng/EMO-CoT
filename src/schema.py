@@ -38,6 +38,16 @@ curriculum_schema = {
     "points": stdict(curriculum_base_schema),
 }
 
+optimization_schema = {
+    # 优化 / 损失组合算法：
+    # - "cot_io_sum": 原始的所有 level 直接求和（当前默认行为）
+    # - "penalty":    惩罚函数法，按幂次加权求和
+    # - "emo_g":      基于梯度范数选择单一 level 更新
+    "algo": merge(tstring, allowed(["cot_io_sum", "penalty", "emo_g"]), default("cot_io_sum")),
+    # penalty 方法的超参数：rho > 1 时，低层级的损失权重更大
+    "penalty_rho": merge(tfloat, default(1.0)),
+}
+
 TASK_LIST = [
     "relu_nn_regression",
 ]
@@ -51,6 +61,7 @@ training_schema = {
     "train_steps": merge(tinteger, default(1000)),
     "save_every_steps": merge(tinteger, default(1000)),  # how often to checkpoint
     "keep_every_steps": merge(tinteger, default(-1)),  # permanent checkpoints
+    "optimization": stdict(optimization_schema),
     "resume_id": merge(tstring, nullable, default(None)),  # run uuid64
     "curriculum": stdict(curriculum_schema),
 }

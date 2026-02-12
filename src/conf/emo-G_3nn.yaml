@@ -6,7 +6,7 @@ wandb:
     project: EMO-CoT
     entity: zhengchuhong666fr-uc-san-diego
     log_every_steps: 100
-    name: CoT-IO, test run, EMO-Frame   
+    name: emo-G, test run, EMO-Frame   
     notes: 
 
 model:
@@ -40,7 +40,7 @@ training:
             inc: 1
             interval: 2000
     optimization:
-        algo: cot_io_sum
+        algo: emo_g 
         penalty_rho: 10.0
 
-out_dir: ../models/cot-IO_3nn
+out_dir: ../models/emo-G_3nn

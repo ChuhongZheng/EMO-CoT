@@ -23,13 +23,64 @@ torch.backends.cudnn.benchmark = True
 
 
 
-def train_step(model, xs, ys, optimizer, loss_func, layer_activations=None):
+def _train_step_cot_io_sum(model, xs, ys, optimizer, loss_func, layer_activations=None):
+    """
+    原始 CoT-I/O 行为：直接把所有 level 的 loss 求和作为优化目标。
+    """
     optimizer.zero_grad()
-    losses, loss = model(xs, ys, loss_func, layer_activations=layer_activations)
-    loss.backward()
+    losses, total_loss = model(xs, ys, loss_func, layer_activations=layer_activations)
+    total_loss.backward()
     optimizer.step()
     losses = [ls.detach().item() for ls in losses]
-    return losses, loss.detach().item()
+    return losses, total_loss.detach().item()
+
+
+def _train_step_penalty(model, xs, ys, optimizer, loss_func, layer_activations, rho: float):
+    """
+    Penalty Method：L = sum_k rho^{K-1-k} * f_k(theta)
+    """
+    optimizer.zero_grad()
+    losses, _ = model(xs, ys, loss_func, layer_activations=layer_activations)
+    K = len(losses)
+    weights = [rho ** (K - 1 - k) for k in range(K)]
+    total_loss = sum(w * l for w, l in zip(weights, losses))
+    total_loss.backward()
+    optimizer.step()
+    losses = [ls.detach().item() for ls in losses]
+    return losses, total_loss.detach().item()
+
+
+def _train_step_emo_g(model, xs, ys, optimizer, loss_func, layer_activations=None):
+    """
+    EMO-G：计算每一层 loss 的梯度范数，选择范数最大的那一层做一次真正的更新。
+    """
+    # 先算出所有 level 的 loss
+    optimizer.zero_grad()
+    losses, _ = model(xs, ys, loss_func, layer_activations=layer_activations)
+
+    # 为每个 level 单独计算梯度范数（不更新参数）
+    grad_norms = []
+    for l in losses:
+        optimizer.zero_grad()
+        l.backward(retain_graph=True)
+        total_norm_sq = 0.0
+        for p in model.parameters():
+            if p.grad is not None:
+                param_norm = p.grad.data.norm(2).item()
+                total_norm_sq += param_norm * param_norm
+        grad_norms.append(total_norm_sq ** 0.5)
+
+    # 选择梯度范数最大的 level
+    max_idx = max(range(len(grad_norms)), key=lambda i: grad_norms[i])
+
+    # 用该 level 的 loss 做一次真正的更新
+    optimizer.zero_grad()
+    final_loss = losses[max_idx]
+    final_loss.backward()
+    optimizer.step()
+
+    losses = [ls.detach().item() for ls in losses]
+    return losses, final_loss.detach().item()
 
 
 def train(model, args):
@@ -62,6 +113,9 @@ def train(model, args):
 
     task = task_sampler(**task_sampler_args)
 
+    algo = args.training.optimization.algo
+    penalty_rho = getattr(args.training.optimization, "penalty_rho", 1.0)
+
     for i in pbar:
         xs = data_sampler.sample_xs(
             curriculum.n_points,
@@ -75,8 +129,24 @@ def train(model, args):
             task = task_sampler(**task_sampler_args)
             ys, layer_activations = task.evaluate(xs)
             layer_activations = [act.cuda() for act in layer_activations]
-            losses, loss = train_step(model, xs.cuda(), ys.cuda(), optimizer,
-                loss_func, layer_activations=layer_activations)
+            if algo == "cot_io_sum":
+                losses, loss = _train_step_cot_io_sum(
+                    model, xs.cuda(), ys.cuda(), optimizer,
+                    loss_func, layer_activations=layer_activations,
+                )
+            elif algo == "penalty":
+                losses, loss = _train_step_penalty(
+                    model, xs.cuda(), ys.cuda(), optimizer,
+                    loss_func, layer_activations=layer_activations,
+                    rho=penalty_rho,
+                )
+            elif algo == "emo_g":
+                losses, loss = _train_step_emo_g(
+                    model, xs.cuda(), ys.cuda(), optimizer,
+                    loss_func, layer_activations=layer_activations,
+                )
+            else:
+                raise NotImplementedError(f"Unknown optimization.algo: {algo}")
         else:
             raise NotImplementedError
 
